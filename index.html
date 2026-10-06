@@ -260,6 +260,8 @@
       <button class="chip" data-act="add-child"><span class="icn">＋</span>子を追加<span class="kbd">Tab</span></button>
       <button class="chip" data-act="add-sib"><span class="icn">＋</span>兄弟を追加<span class="kbd">Enter</span></button>
       <button class="chip" data-act="edit">✎ 編集<span class="kbd">F2</span></button>
+      <button class="chip" data-act="up">↑ 上へ<span class="kbd">Alt+↑</span></button>
+      <button class="chip" data-act="down">↓ 下へ<span class="kbd">Alt+↓</span></button>
       <button class="chip danger" data-act="delete">🗑 削除（枝ごと）<span class="kbd">Del</span></button>
     </div>
     <div class="np-row">
@@ -293,6 +295,7 @@
       <div><span class="k">編集</span><b>ダブルクリック / F2</b></div>
       <div><span class="k">確定 / 改行</span><b>Enter / Shift+Enter</b></div>
       <div><span class="k">削除（枝ごと）</span><b>Delete</b></div>
+      <div><span class="k">順番を入れ替え</span><b>Alt+↑ / Alt+↓</b></div>
       <div><span class="k">優先度 高/中/低/なし</span><b>1 / 2 / 3 / 0</b></div>
       <div><span class="k">斜線（却下）</span><b>\</b></div>
       <div><span class="k">取り消し / やり直し</span><b>Ctrl+Z / Ctrl+Shift+Z</b></div>
@@ -398,6 +401,13 @@ function toggleStrike(id){
   const f=find(id); if(!f)return;
   pushUndo(); f.node.struck=!f.node.struck; render(); save();
 }
+function moveNode(id,dir){
+  const f=find(id); if(!f)return;
+  const j=f.idx+dir; if(j<0||j>=f.arr.length)return;
+  pushUndo();
+  f.arr.splice(f.idx,1); f.arr.splice(j,0,f.node);
+  render(); save();
+}
 function toggleCollapse(id){
   const f=find(id); if(!f||!f.node.children.length)return;
   f.node.collapsed=!f.node.collapsed; render(); save();  // collapse is a view op, no undo
@@ -455,19 +465,26 @@ function commitEdit(save2=true){
 /* ============ layout ============ */
 function computeLayout(){
   let cursorY=0;
+  const colBottom=[];
+  const hOf=n=>heights[n.id]||DEF_H;
+  const mark=(n,d)=>{ colBottom[d]=Math.max(colBottom[d]||0, n._y+hOf(n)+V_GAP); };
+  const shift=(n,d,dy)=>{ n._y+=dy; mark(n,d); if(!n.collapsed) n.children.forEach(k=>shift(k,d+1,dy)); };
   const place=(node,depth)=>{
     node._x=depth*COL;
     const kids = node.collapsed?[]:node.children;
     const h = heights[node.id]||DEF_H;
     if(!kids.length){
-      node._y=cursorY; cursorY+=h+V_GAP;
+      node._y=cursorY; cursorY+=h+V_GAP; mark(node,depth);
     }else{
       kids.forEach(k=>place(k,depth+1));
       const f=kids[0], l=kids[kids.length-1];
       const fc=f._y+(heights[f.id]||DEF_H)/2;
       const lc=l._y+(heights[l.id]||DEF_H)/2;
       node._y=(fc+lc)/2 - h/2;
-      if(node._y<cursorY) node._y=cursorY; // avoid overlap on shallow trees
+      // 親は子の中央に置く。同じ列の上のノードと重なるときだけ枝ごと下げる
+      const minY=colBottom[depth]||0;
+      if(node._y<minY){ const dy=minY-node._y; node._y=minY; kids.forEach(k=>shift(k,depth+1,dy)); cursorY+=dy; }
+      mark(node,depth);
       cursorY=Math.max(cursorY, node._y+h+V_GAP);
     }
   };
@@ -722,6 +739,7 @@ window.addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="y"){ e.preventDefault(); redo(); return; }
   if(inField) return; // shortcuts below only when not typing
   if(!selId) return;
+  if(e.altKey&&(e.key==="ArrowUp"||e.key==="ArrowDown")){ e.preventDefault(); moveNode(selId,e.key==="ArrowUp"?-1:1); return; }
   switch(e.key){
     case "Tab": e.preventDefault(); addChild(selId); break;
     case "Enter": e.preventDefault(); addSibling(selId); break;
@@ -743,6 +761,8 @@ $("#nodePanel").addEventListener("click",e=>{
   if(a==="add-child")addChild(selId);
   else if(a==="add-sib")addSibling(selId);
   else if(a==="edit")startEdit(selId);
+  else if(a==="up")moveNode(selId,-1);
+  else if(a==="down")moveNode(selId,1);
   else if(a==="delete")deleteNode(selId);
   else if(a==="strike")toggleStrike(selId);
 });
